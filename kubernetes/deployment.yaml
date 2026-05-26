@@ -1,0 +1,192 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: terraform-visualizer
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tf-visualizer-config
+  namespace: terraform-visualizer
+data:
+  STATE_SOURCE: "local"
+  STATE_PATH: "/data/terraform.tfstate"
+  AWS_REGION: "us-east-1"
+  AUTO_RELOAD: "true"
+  PORT: "7070"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tf-visualizer-secrets
+  namespace: terraform-visualizer
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: ""
+  AWS_SECRET_ACCESS_KEY: ""
+  STATE_BUCKET: ""
+  STATE_KEY: ""
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tf-state-pvc
+  namespace: terraform-visualizer
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tf-visualizer-backend
+  namespace: terraform-visualizer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tf-visualizer-backend
+  template:
+    metadata:
+      labels:
+        app: tf-visualizer-backend
+    spec:
+      containers:
+      - name: backend
+        image: tf-visualizer-backend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 7070
+        envFrom:
+        - configMapRef:
+            name: tf-visualizer-config
+        - secretRef:
+            name: tf-visualizer-secrets
+        volumeMounts:
+        - name: tf-state-volume
+          mountPath: /data
+          readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 7070
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 7070
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: tf-state-volume
+        persistentVolumeClaim:
+          claimName: tf-state-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tf-visualizer-backend
+  namespace: terraform-visualizer
+spec:
+  selector:
+    app: tf-visualizer-backend
+  ports:
+  - port: 7070
+    targetPort: 7070
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tf-visualizer-frontend
+  namespace: terraform-visualizer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tf-visualizer-frontend
+  template:
+    metadata:
+      labels:
+        app: tf-visualizer-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: tf-visualizer-frontend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+        env:
+        - name: REACT_APP_API_URL
+          value: "http://tf-visualizer-backend:7070"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tf-visualizer-frontend
+  namespace: terraform-visualizer
+spec:
+  selector:
+    app: tf-visualizer-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+  type: LoadBalancer
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tf-visualizer-ingress
+  namespace: terraform-visualizer
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: terraform-visualizer.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tf-visualizer-frontend
+            port:
+              number: 80
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: tf-visualizer-backend
+            port:
+              number: 7070
