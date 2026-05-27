@@ -16,7 +16,7 @@ function App() {
   const [showDriftOnly, setShowDriftOnly] = useState(false);
   const [viewMode, setViewMode] = useState('infra'); // 'infra' or 'drift'
 
-  const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+  const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5050';
 
   // AWS Service Icons (using simple styled divs with text)
   const getAWSIcon = (type) => {

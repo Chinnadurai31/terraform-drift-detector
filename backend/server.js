@@ -1,3 +1,4 @@
+require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs').promises;
@@ -6,7 +7,7 @@ const AWS = require('aws-sdk');
 const { MongoClient, ObjectId } = require('mongodb');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5050;
 
 app.use(cors());
 app.use(express.json());
@@ -20,7 +21,7 @@ let profilesCollection;
  */
 async function connectDB() {
   try {
-    const mongoUri = process.env.MONGODB_URI || 'mongodb://admin:password@localhost:27017';
+    const mongoUri = process.env.MONGODB_URI || 'mongodb://admin:admin123@localhost:27017';
     const client = new MongoClient(mongoUri);
     await client.connect();
     db = client.db('terraform-visualizer');
