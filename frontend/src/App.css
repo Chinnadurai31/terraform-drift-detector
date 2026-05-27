@@ -1596,3 +1596,318 @@ body {
     gap: 1rem;
   }
 }
+
+/* Credential Warning Badge */
+.credential-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 165, 0, 0.1);
+  border: 1px solid rgba(255, 165, 0, 0.3);
+  border-radius: 6px;
+  color: #FFA500;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.credential-warning svg {
+  flex-shrink: 0;
+}
+
+/* State Age Badge Warning */
+.stat-badge-warning {
+  border-color: rgba(255, 165, 0, 0.3) !important;
+  background: rgba(255, 165, 0, 0.1) !important;
+}
+
+.stat-badge-warning .stat-label {
+  color: #FFA500 !important;
+}
+
+/* State Warning Banner */
+.state-warning-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem;
+  margin: 1rem 0;
+  background: rgba(255, 165, 0, 0.1);
+  border: 1px solid rgba(255, 165, 0, 0.3);
+  border-radius: 8px;
+  color: #FFA500;
+}
+
+.state-warning-banner svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.state-warning-banner strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.state-warning-banner p {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #c9ab72;
+}
+
+/* Drift Filter Button */
+.drift-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid rgba(248, 81, 73, 0.3);
+  border-radius: 6px;
+  color: #F85149;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 1rem;
+}
+
+.drift-filter-btn:hover {
+  background: rgba(248, 81, 73, 0.15);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.drift-filter-btn.active {
+  background: rgba(248, 81, 73, 0.2);
+  border-color: #F85149;
+}
+
+.drift-filter-btn svg {
+  flex-shrink: 0;
+}
+
+.drift-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* State Timestamp - Top Right Corner */
+.state-timestamp {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  background: rgba(139, 148, 158, 0.1);
+  border: 1px solid rgba(139, 148, 158, 0.2);
+  border-radius: 6px;
+  color: #8b949e;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.state-timestamp svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.state-timestamp-warning {
+  background: rgba(255, 165, 0, 0.1);
+  border-color: rgba(255, 165, 0, 0.3);
+  color: #FFA500;
+}
+
+.state-timestamp-warning svg {
+  stroke: #FFA500;
+  opacity: 1;
+}
+
+/* View Mode Toggle Switch */
+.view-toggle {
+  position: relative;
+  display: flex;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 4px;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.toggle-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #8b949e;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.3s ease;
+  z-index: 2;
+  min-width: 140px;
+  justify-content: center;
+}
+
+.toggle-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.toggle-option svg {
+  flex-shrink: 0;
+  transition: all 0.3s ease;
+}
+
+.toggle-option.active {
+  color: #ffffff;
+}
+
+.toggle-option:not(.active):hover:not(:disabled) {
+  color: #c9d1d9;
+}
+
+.toggle-slider {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  height: calc(100% - 8px);
+  background: linear-gradient(135deg, #388BFD 0%, #2563EB 100%);
+  border-radius: 6px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1;
+  box-shadow: 0 2px 8px rgba(56, 139, 253, 0.3);
+}
+
+.toggle-slider.drift-active {
+  transform: translateX(calc(100% + 4px));
+  background: linear-gradient(135deg, #F85149 0%, #E03131 100%);
+  box-shadow: 0 2px 8px rgba(248, 81, 73, 0.3);
+}
+
+/* Small spinner for loading state */
+.small-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Drift Detection Loading Screen */
+.drift-loading-screen {
+  position: fixed;
+  top: 80px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #0d1117;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.drift-loading-content {
+  text-align: center;
+  max-width: 500px;
+}
+
+.drift-loading-spinner {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 2rem;
+  border: 4px solid rgba(248, 81, 73, 0.1);
+  border-top-color: #F85149;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.drift-loading-content h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #c9d1d9;
+  margin-bottom: 0.5rem;
+}
+
+.drift-loading-content p {
+  font-size: 0.875rem;
+  color: #8b949e;
+  margin-bottom: 2rem;
+}
+
+.drift-loading-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.loading-step {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  transition: all 0.3s;
+}
+
+.loading-step.pending {
+  opacity: 0.5;
+}
+
+.loading-step .step-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  font-weight: bold;
+  background: #238636;
+  color: white;
+  flex-shrink: 0;
+}
+
+.loading-step .step-icon.active {
+  background: #F85149;
+}
+
+.loading-step.pending .step-icon {
+  background: #30363d;
+  color: #8b949e;
+}
+
+.step-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-step span {
+  color: #c9d1d9;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.loading-step.pending span {
+  color: #8b949e;
+}

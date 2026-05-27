@@ -1,26 +1,41 @@
 version: '3.8'
 
 services:
+  mongo:
+    image: mongo:7
+    container_name: tf-visualizer-mongo
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      
+      - MONGO_INITDB_ROOT_PASSWORD=password
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   backend:
     build: ./backend
     container_name: tf-visualizer-backend
     ports:
-      - "7070:7070"
+      - "5000:5000"
     environment:
-      - STATE_SOURCE=${STATE_SOURCE:-local}
-      - STATE_PATH=${STATE_PATH:-/data/terraform.tfstate}
-      - STATE_BUCKET=${STATE_BUCKET}
-      - STATE_KEY=${STATE_KEY}
-      - AWS_REGION=${AWS_REGION:-us-east-1}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AUTO_RELOAD=${AUTO_RELOAD:-true}
-      - PORT=7070
+      - MONGODB_URI=mongodb://admin:password@mongo:27017
+      - PORT=5000
     volumes:
       - ./data:/data:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:7070/api/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -32,7 +47,7 @@ services:
     ports:
       - "3000:80"
     environment:
-      - REACT_APP_API_URL=http://localhost:7070
+      - REACT_APP_API_URL=http://localhost:5000
     depends_on:
       - backend
     restart: unless-stopped
@@ -44,4 +59,4 @@ services:
       start_period: 10s
 
 volumes:
-  data:
+  mongo-data:

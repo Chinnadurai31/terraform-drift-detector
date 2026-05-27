@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
 import LoginPage from './components/LoginPage';
 import ProfileList from './components/ProfileList';
@@ -6,9 +6,39 @@ import AddProfile from './components/AddProfile';
 import ProfileDetail from './components/ProfileDetail';
 
 function App() {
-  const [currentView, setCurrentView] = useState('login'); // 'login', 'profiles', 'add', 'edit', 'detail'
-  const [selectedProfile, setSelectedProfile] = useState(null);
-  const [editingProfile, setEditingProfile] = useState(null);
+  // Initialize state from localStorage
+  const [currentView, setCurrentView] = useState(() => {
+    return localStorage.getItem('currentView') || 'login';
+  });
+  const [selectedProfile, setSelectedProfile] = useState(() => {
+    const saved = localStorage.getItem('selectedProfile');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [editingProfile, setEditingProfile] = useState(() => {
+    const saved = localStorage.getItem('editingProfile');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  // Persist state to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('currentView', currentView);
+  }, [currentView]);
+
+  useEffect(() => {
+    if (selectedProfile) {
+      localStorage.setItem('selectedProfile', JSON.stringify(selectedProfile));
+    } else {
+      localStorage.removeItem('selectedProfile');
+    }
+  }, [selectedProfile]);
+
+  useEffect(() => {
+    if (editingProfile) {
+      localStorage.setItem('editingProfile', JSON.stringify(editingProfile));
+    } else {
+      localStorage.removeItem('editingProfile');
+    }
+  }, [editingProfile]);
 
   const handleLogin = () => {
     setCurrentView('profiles');

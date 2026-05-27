@@ -3,44 +3,31 @@ const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
 const AWS = require('aws-sdk');
+const { MongoClient, ObjectId } = require('mongodb');
 
 const app = express();
-const PORT = process.env.PORT || 7070;
+const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
 
-const PROFILES_FILE = path.join(__dirname, 'profiles.json');
-
-// In-memory cache for profiles
-let profiles = [];
-
-/**
- * Load profiles from file
- */
-async function loadProfiles() {
-  try {
-    const data = await fs.readFile(PROFILES_FILE, 'utf8');
-    profiles = JSON.parse(data);
-    console.log(`✓ Loaded ${profiles.length} profiles`);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      profiles = [];
-      await saveProfiles();
-    } else {
-      console.error('Error loading profiles:', error.message);
-    }
-  }
-}
+// MongoDB connection
+let db;
+let profilesCollection;
 
 /**
- * Save profiles to file
+ * Connect to MongoDB
  */
-async function saveProfiles() {
+async function connectDB() {
   try {
-    await fs.writeFile(PROFILES_FILE, JSON.stringify(profiles, null, 2));
+    const mongoUri = process.env.MONGODB_URI || 'mongodb://admin:password@localhost:27017';
+    const client = new MongoClient(mongoUri);
+    await client.connect();
+    db = client.db('terraform-visualizer');
+    profilesCollection = db.collection('profiles');
+    console.log('✓ Connected to MongoDB');
   } catch (error) {
-    console.error('Error saving profiles:', error.message);
+    console.error('Error connecting to MongoDB:', error.message);
     throw error;
   }
 }
@@ -101,6 +88,17 @@ async function readTerraformState(profile) {
     return await readS3State(profile.stateBucket, profile.stateKey, profile.credentials);
   } else {
     return await readLocalState(profile.statePath);
+  }
+}
+
+/**
+ * Helper to convert string ID to ObjectId
+ */
+function toObjectId(id) {
+  try {
+    return new ObjectId(id);
+  } catch (error) {
+    return null;
   }
 }
 
@@ -476,51 +474,76 @@ const driftDetectors = {
 /**
  * Get all profiles
  */
-app.get('/api/profiles', (req, res) => {
-  // Don't send credentials to frontend
-  const sanitizedProfiles = profiles.map(p => ({
-    id: p.id,
-    name: p.name,
-    stateSource: p.stateSource,
-    statePath: p.statePath,
-    stateBucket: p.stateBucket,
-    stateKey: p.stateKey,
-    hasCredentials: !!(p.credentials && p.credentials.accessKeyId)
-  }));
+app.get('/api/profiles', async (req, res) => {
+  try {
+    const profiles = await profilesCollection.find().toArray();
 
-  res.json({
-    success: true,
-    data: sanitizedProfiles
-  });
+    // Don't send credentials to frontend
+    const sanitizedProfiles = profiles.map(p => ({
+      id: p._id.toString(),
+      name: p.name,
+      stateSource: p.stateSource,
+      statePath: p.statePath,
+      stateBucket: p.stateBucket,
+      stateKey: p.stateKey,
+      hasCredentials: !!(p.credentials && p.credentials.accessKeyId)
+    }));
+
+    res.json({
+      success: true,
+      data: sanitizedProfiles
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 /**
  * Get single profile (without credentials)
  */
-app.get('/api/profiles/:id', (req, res) => {
-  const { id } = req.params;
-  const profile = profiles.find(p => p.id === id);
+app.get('/api/profiles/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const objectId = toObjectId(id);
 
-  if (!profile) {
-    return res.status(404).json({
+    if (!objectId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid profile ID'
+      });
+    }
+
+    const profile = await profilesCollection.findOne({ _id: objectId });
+
+    if (!profile) {
+      return res.status(404).json({
+        success: false,
+        error: 'Profile not found'
+      });
+    }
+
+    // Don't send credentials
+    res.json({
+      success: true,
+      data: {
+        id: profile._id.toString(),
+        name: profile.name,
+        stateSource: profile.stateSource,
+        statePath: profile.statePath,
+        stateBucket: profile.stateBucket,
+        stateKey: profile.stateKey,
+        hasCredentials: !!(profile.credentials && profile.credentials.accessKeyId)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
       success: false,
-      error: 'Profile not found'
+      error: error.message
     });
   }
-
-  // Don't send credentials
-  res.json({
-    success: true,
-    data: {
-      id: profile.id,
-      name: profile.name,
-      stateSource: profile.stateSource,
-      statePath: profile.statePath,
-      stateBucket: profile.stateBucket,
-      stateKey: profile.stateKey,
-      hasCredentials: !!(profile.credentials && profile.credentials.accessKeyId)
-    }
-  });
 });
 
 /**
@@ -552,23 +575,21 @@ app.post('/api/profiles', async (req, res) => {
     }
 
     const profile = {
-      id: Date.now().toString(),
       name,
       stateSource,
       statePath: statePath || null,
       stateBucket: stateBucket || null,
       stateKey: stateKey || null,
       credentials: credentials || null,
-      createdAt: new Date().toISOString()
+      createdAt: new Date()
     };
 
-    profiles.push(profile);
-    await saveProfiles();
+    const result = await profilesCollection.insertOne(profile);
 
     res.json({
       success: true,
       data: {
-        id: profile.id,
+        id: result.insertedId.toString(),
         name: profile.name
       }
     });
@@ -588,34 +609,45 @@ app.put('/api/profiles/:id', async (req, res) => {
     const { id } = req.params;
     const { name, stateSource, statePath, stateBucket, stateKey, credentials } = req.body;
 
-    const index = profiles.findIndex(p => p.id === id);
+    const objectId = toObjectId(id);
 
-    if (index === -1) {
+    if (!objectId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid profile ID'
+      });
+    }
+
+    const updateFields = {
+      updatedAt: new Date()
+    };
+
+    if (name !== undefined) updateFields.name = name;
+    if (stateSource !== undefined) updateFields.stateSource = stateSource;
+    if (statePath !== undefined) updateFields.statePath = statePath;
+    if (stateBucket !== undefined) updateFields.stateBucket = stateBucket;
+    if (stateKey !== undefined) updateFields.stateKey = stateKey;
+    if (credentials !== undefined) updateFields.credentials = credentials;
+
+    const result = await profilesCollection.updateOne(
+      { _id: objectId },
+      { $set: updateFields }
+    );
+
+    if (result.matchedCount === 0) {
       return res.status(404).json({
         success: false,
         error: 'Profile not found'
       });
     }
 
-    // Update profile
-    profiles[index] = {
-      ...profiles[index],
-      name: name || profiles[index].name,
-      stateSource: stateSource || profiles[index].stateSource,
-      statePath: statePath !== undefined ? statePath : profiles[index].statePath,
-      stateBucket: stateBucket !== undefined ? stateBucket : profiles[index].stateBucket,
-      stateKey: stateKey !== undefined ? stateKey : profiles[index].stateKey,
-      credentials: credentials !== undefined ? credentials : profiles[index].credentials,
-      updatedAt: new Date().toISOString()
-    };
-
-    await saveProfiles();
+    const updatedProfile = await profilesCollection.findOne({ _id: objectId });
 
     res.json({
       success: true,
       data: {
-        id: profiles[index].id,
-        name: profiles[index].name
+        id: updatedProfile._id.toString(),
+        name: updatedProfile.name
       }
     });
   } catch (error) {
@@ -632,17 +664,23 @@ app.put('/api/profiles/:id', async (req, res) => {
 app.delete('/api/profiles/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const index = profiles.findIndex(p => p.id === id);
+    const objectId = toObjectId(id);
 
-    if (index === -1) {
+    if (!objectId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid profile ID'
+      });
+    }
+
+    const result = await profilesCollection.deleteOne({ _id: objectId });
+
+    if (result.deletedCount === 0) {
       return res.status(404).json({
         success: false,
         error: 'Profile not found'
       });
     }
-
-    profiles.splice(index, 1);
-    await saveProfiles();
 
     res.json({
       success: true,
@@ -664,7 +702,16 @@ app.delete('/api/profiles/:id', async (req, res) => {
 app.get('/api/profiles/:id/graph', async (req, res) => {
   try {
     const { id } = req.params;
-    const profile = profiles.find(p => p.id === id);
+    const objectId = toObjectId(id);
+
+    if (!objectId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid profile ID'
+      });
+    }
+
+    const profile = await profilesCollection.findOne({ _id: objectId });
 
     if (!profile) {
       return res.status(404).json({
@@ -701,7 +748,16 @@ app.get('/api/profiles/:id/graph', async (req, res) => {
 app.post('/api/profiles/:id/drift/detect', async (req, res) => {
   try {
     const { id } = req.params;
-    const profile = profiles.find(p => p.id === id);
+    const objectId = toObjectId(id);
+
+    if (!objectId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid profile ID'
+      });
+    }
+
+    const profile = await profilesCollection.findOne({ _id: objectId });
 
     if (!profile) {
       return res.status(404).json({
@@ -817,17 +873,108 @@ app.post('/api/profiles/:id/drift/detect', async (req, res) => {
 });
 
 /**
+ * Validate AWS credentials
+ */
+app.post('/api/profiles/:id/credentials/validate', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const objectId = toObjectId(id);
+
+    if (!objectId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid profile ID'
+      });
+    }
+
+    const profile = await profilesCollection.findOne({ _id: objectId });
+
+    if (!profile) {
+      return res.status(404).json({
+        success: false,
+        error: 'Profile not found'
+      });
+    }
+
+    if (!profile.credentials || !profile.credentials.accessKeyId) {
+      return res.json({
+        success: true,
+        valid: false,
+        reason: 'No credentials configured for this profile'
+      });
+    }
+
+    // Test credentials by calling STS GetCallerIdentity (lightweight check)
+    try {
+      const stsConfig = {
+        accessKeyId: profile.credentials.accessKeyId,
+        secretAccessKey: profile.credentials.secretAccessKey,
+        region: profile.credentials.region || 'us-east-1'
+      };
+
+      if (profile.credentials.sessionToken) {
+        stsConfig.sessionToken = profile.credentials.sessionToken;
+      }
+
+      const sts = new AWS.STS(stsConfig);
+      const identity = await sts.getCallerIdentity().promise();
+
+      return res.json({
+        success: true,
+        valid: true,
+        identity: {
+          account: identity.Account,
+          arn: identity.Arn,
+          userId: identity.UserId
+        }
+      });
+    } catch (error) {
+      // Check if credentials are expired or invalid
+      const isExpired = error.code === 'ExpiredToken' || error.code === 'ExpiredTokenException';
+      const isInvalid = error.code === 'InvalidClientTokenId' ||
+                        error.code === 'SignatureDoesNotMatch' ||
+                        error.code === 'InvalidAccessKeyId';
+
+      return res.json({
+        success: true,
+        valid: false,
+        expired: isExpired,
+        invalid: isInvalid,
+        reason: error.message,
+        code: error.code
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
  * Health check
  */
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    profiles: profiles.length
-  });
+app.get('/api/health', async (req, res) => {
+  try {
+    const profileCount = await profilesCollection.countDocuments();
+    res.json({
+      status: 'ok',
+      database: 'connected',
+      profiles: profileCount
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      database: 'disconnected',
+      error: error.message
+    });
+  }
 });
 
 // Start server
 app.listen(PORT, async () => {
   console.log(`🚀 Terraform State Visualizer API running on port ${PORT}`);
-  await loadProfiles();
+  await connectDB();
+  console.log(`✓ Server ready`);
 });
