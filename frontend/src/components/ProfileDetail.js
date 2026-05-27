@@ -13,8 +13,12 @@ function ProfileDetail({ profile, onBack }) {
   const [driftData, setDriftData] = useState(null);
   const [driftLoading, setDriftLoading] = useState(false);
   const [viewMode, setViewMode] = useState('infra');
+  const [credentialStatus, setCredentialStatus] = useState(null);
+  const [credentialChecking, setCredentialChecking] = useState(false);
+  const [stateMetadata, setStateMetadata] = useState(null);
+  const [showOnlyDrifted, setShowOnlyDrifted] = useState(false);
 
-  const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:7070';
+  const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
   // AWS Service Icons
   const getAWSIcon = (type) => {
@@ -59,6 +63,51 @@ function ProfileDetail({ profile, onBack }) {
     return colors[category] || colors['other'];
   };
 
+  // Check drift
+  const handleCheckDrift = async () => {
+    // Don't run drift detection if no credentials
+    if (!profile.hasCredentials) {
+      setViewMode('drift');
+      setDriftData(null);
+      return;
+    }
+
+    setDriftLoading(true);
+    setViewMode('drift');
+    setShowOnlyDrifted(true); // Auto-enable drift filter
+    try {
+      const response = await axios.post(`${API_BASE}/api/profiles/${profile.id}/drift/detect`);
+      setDriftData(response.data.data);
+      setDriftLoading(false);
+    } catch (err) {
+      setError('Failed to check drift: ' + err.message);
+      setDriftLoading(false);
+    }
+  };
+
+  // Validate AWS credentials
+  const validateCredentials = async () => {
+    if (!profile.hasCredentials) {
+      // Clear any old drift data when no credentials
+      setDriftData(null);
+      setCredentialStatus({ valid: false, reason: 'No credentials configured' });
+      return;
+    }
+
+    setCredentialChecking(true);
+    try {
+      const response = await axios.post(`${API_BASE}/api/profiles/${profile.id}/credentials/validate`);
+      setCredentialStatus(response.data);
+      setCredentialChecking(false);
+
+      // Don't auto-trigger drift on initial load
+      // User must manually switch to drift mode
+    } catch (err) {
+      console.error('Failed to validate credentials:', err);
+      setCredentialChecking(false);
+    }
+  };
+
   // Load resources
   const loadResources = async () => {
     setLoading(true);
@@ -66,7 +115,14 @@ function ProfileDetail({ profile, onBack }) {
 
     try {
       const response = await axios.get(`${API_BASE}/api/profiles/${profile.id}/graph`);
-      const { data } = response.data;
+      const { data, meta } = response.data;
+
+      // Store state metadata
+      setStateMetadata({
+        lastModified: meta.lastModified,
+        source: meta.source,
+        nodeCount: meta.nodeCount
+      });
 
       const resourceList = data.nodes.map(node => ({
         id: node.data.id,
@@ -91,11 +147,36 @@ function ProfileDetail({ profile, onBack }) {
 
       setGroupedResources(grouped);
       setLoading(false);
+
+      // After loading resources, validate credentials and auto-check drift
+      validateCredentials();
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to load resources');
       setLoading(false);
     }
   };
+
+  // Calculate how old the state file is
+  const getStateAge = () => {
+    if (!stateMetadata || !stateMetadata.lastModified) return null;
+
+    const lastModified = new Date(stateMetadata.lastModified);
+    const now = new Date();
+    const diffMs = now - lastModified;
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffDays > 0) {
+      return { value: diffDays, unit: 'day', isOld: diffDays > 1 };
+    } else if (diffHours > 0) {
+      return { value: diffHours, unit: 'hour', isOld: diffHours > 24 };
+    } else {
+      const diffMinutes = Math.floor(diffMs / (1000 * 60));
+      return { value: diffMinutes, unit: 'minute', isOld: false };
+    }
+  };
+
+  const stateAge = getStateAge();
 
   // Toggle resource type expansion
   const toggleType = (type) => {
@@ -132,26 +213,39 @@ function ProfileDetail({ profile, onBack }) {
       });
     }
 
+    // Filter by drift status
+    if (showOnlyDrifted && driftData) {
+      types = types.filter(type => {
+        return groupedResources[type].some(resource => {
+          const drift = getDriftStatus(resource.id);
+          return drift && (drift.driftStatus === 'drifted' || drift.driftStatus === 'deleted');
+        });
+      });
+    }
+
     return types.sort();
   };
 
-  // Check drift
-  const handleCheckDrift = async () => {
-    setDriftLoading(true);
-    setViewMode('drift');
-    try {
-      const response = await axios.post(`${API_BASE}/api/profiles/${profile.id}/drift/detect`);
-      setDriftData(response.data.data);
-      setDriftLoading(false);
-    } catch (err) {
-      setError('Failed to check drift: ' + err.message);
-      setDriftLoading(false);
+  // Get filtered resources for a type (used when rendering)
+  const getFilteredResourcesForType = (type) => {
+    let resources = groupedResources[type];
+
+    // If showing only drifted, filter resources within the type
+    if (showOnlyDrifted && driftData) {
+      resources = resources.filter(resource => {
+        const drift = getDriftStatus(resource.id);
+        return drift && (drift.driftStatus === 'drifted' || drift.driftStatus === 'deleted');
+      });
     }
+
+    return resources;
   };
 
   // Switch to current infra view
   const handleCurrentInfra = () => {
     setViewMode('infra');
+    setShowOnlyDrifted(false); // Reset drift filter when switching to infra view
+    setDriftData(null); // Clear old drift data
   };
 
   // Get drift status for a resource
@@ -213,18 +307,18 @@ function ProfileDetail({ profile, onBack }) {
             <div className="logo">
               <h1>{profile.name}</h1>
             </div>
-            <div className="stats-badges">
-              <div className="stat-badge">
-                <span className="stat-value">{totalResources}</span>
-                <span className="stat-label">Resources</span>
-              </div>
-              <div className="stat-badge">
-                <span className="stat-value">{filteredTypes.length}</span>
-                <span className="stat-label">Types</span>
-              </div>
-            </div>
           </div>
           <div className="header-actions">
+            {/* State File Timestamp - Top Right */}
+            {stateAge && (
+              <div className={`state-timestamp ${stateAge.isOld ? 'state-timestamp-warning' : ''}`}>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1" fill="none"/>
+                  <path d="M6 3V6L8 7.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                </svg>
+                <span>Statefile: {stateAge.value}{stateAge.unit.charAt(0)} ago</span>
+              </div>
+            )}
             <div className="search-container">
               <svg className="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="2"/>
@@ -238,38 +332,55 @@ function ProfileDetail({ profile, onBack }) {
                 className="search-input"
               />
             </div>
-            <button
-              onClick={handleCurrentInfra}
-              className={`btn ${viewMode === 'infra' ? 'btn-primary' : ''}`}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <rect x="2" y="2" width="5" height="5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                <rect x="9" y="2" width="5" height="5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                <rect x="2" y="9" width="5" height="5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                <rect x="9" y="9" width="5" height="5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-              </svg>
-              Current Infra
-            </button>
-            <button
-              onClick={handleCheckDrift}
-              className={`btn btn-drift ${viewMode === 'drift' ? 'btn-primary' : ''}`}
-              disabled={driftLoading}
-            >
-              {driftLoading ? (
-                <>
-                  <div className="small-spinner"></div>
-                  Checking...
-                </>
-              ) : (
-                <>
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M8 2L11 5H9V9H7V5H5L8 2Z" fill="currentColor"/>
-                    <path d="M8 14L5 11H7V7H9V11H11L8 14Z" fill="currentColor"/>
-                  </svg>
-                  Check Drift
-                </>
-              )}
-            </button>
+
+            {/* View Mode Toggle Switch */}
+            <div className="view-toggle">
+              <button
+                className={`toggle-option ${viewMode === 'infra' ? 'active' : ''}`}
+                onClick={handleCurrentInfra}
+                disabled={driftLoading || credentialChecking}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <rect x="2" y="2" width="5" height="5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  <rect x="9" y="2" width="5" height="5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  <rect x="2" y="9" width="5" height="5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  <rect x="9" y="9" width="5" height="5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                </svg>
+                <span>Current Infra</span>
+              </button>
+              <button
+                className={`toggle-option ${viewMode === 'drift' ? 'active' : ''}`}
+                onClick={handleCheckDrift}
+                disabled={driftLoading || credentialChecking}
+              >
+                {driftLoading || credentialChecking ? (
+                  <>
+                    <div className="small-spinner"></div>
+                    <span>{credentialChecking ? 'Validating...' : 'Checking...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <path d="M8 2L11 5H9V9H7V5H5L8 2Z" fill="currentColor"/>
+                      <path d="M8 14L5 11H7V7H9V11H11L8 14Z" fill="currentColor"/>
+                    </svg>
+                    <span>Drift Detection</span>
+                  </>
+                )}
+              </button>
+              <div className={`toggle-slider ${viewMode === 'drift' ? 'drift-active' : ''}`}></div>
+            </div>
+
+            {/* Credential Status Badge */}
+            {credentialStatus && !credentialStatus.valid && (
+              <div className="credential-warning">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <circle cx="8" cy="8" r="7" stroke="#FFA500" strokeWidth="2" fill="none"/>
+                  <text x="8" y="11" textAnchor="middle" fontSize="10" fill="#FFA500" fontWeight="bold">!</text>
+                </svg>
+                <span>{credentialStatus.expired ? 'Credentials Expired' : 'Invalid Credentials'}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -296,8 +407,36 @@ function ProfileDetail({ profile, onBack }) {
           })}
         </div>
 
-        {/* Drift Summary */}
-        {driftData && (
+        {/* State Freshness Warning */}
+        {stateAge && stateAge.isOld && (
+          <div className="state-warning-banner">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M10 6V10M10 14H10.01M19 10C19 14.9706 14.9706 19 10 19C5.02944 19 1 14.9706 1 10C1 5.02944 5.02944 1 10 1C14.9706 1 19 5.02944 19 10Z" stroke="#FFA500" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+            <div>
+              <strong>Potentially Stale Data</strong>
+              <p>This state file was last modified {stateAge.value} {stateAge.unit}{stateAge.value !== 1 ? 's' : ''} ago.
+              The infrastructure shown may not reflect current AWS state.
+              {profile.hasCredentials ? ' Run drift detection to verify.' : ' Add AWS credentials to enable drift detection.'}</p>
+            </div>
+          </div>
+        )}
+
+        {/* No Credentials Warning */}
+        {!profile.hasCredentials && viewMode === 'drift' && (
+          <div className="state-warning-banner">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M10 6V10M10 14H10.01M19 10C19 14.9706 14.9706 19 10 19C5.02944 19 1 14.9706 1 10C1 5.02944 5.02944 1 10 1C14.9706 1 19 5.02944 19 10Z" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+            <div>
+              <strong>Drift Detection Unavailable</strong>
+              <p>AWS credentials are not configured for this profile. Drift detection requires valid AWS credentials to compare state file with live AWS resources.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Drift Summary - Only show in drift mode */}
+        {viewMode === 'drift' && driftData && (
           <div className="drift-summary">
             <div className="drift-summary-stats">
               <div className="drift-stat">
@@ -319,11 +458,41 @@ function ProfileDetail({ profile, onBack }) {
         )}
       </header>
 
+      {/* Drift Detection Loading Screen */}
+      {viewMode === 'drift' && driftLoading && !driftData && (
+        <div className="drift-loading-screen">
+          <div className="drift-loading-content">
+            <div className="drift-loading-spinner"></div>
+            <h2>Detecting Infrastructure Drift</h2>
+            <p>Comparing state file with live AWS resources...</p>
+            <div className="drift-loading-steps">
+              <div className="loading-step">
+                <div className="step-icon">✓</div>
+                <span>Reading Terraform state</span>
+              </div>
+              <div className="loading-step">
+                <div className="step-icon active">
+                  <div className="step-spinner"></div>
+                </div>
+                <span>Querying AWS resources</span>
+              </div>
+              <div className="loading-step pending">
+                <div className="step-icon">⋯</div>
+                <span>Analyzing differences</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
-      <div className="main-container">
-        <div className="resource-types-list">
+      {!(viewMode === 'drift' && driftLoading && !driftData) && (
+        <div className="main-container">
+          {/* Hide resources in drift mode if no credentials */}
+          {!(viewMode === 'drift' && !profile.hasCredentials) && (
+          <div className="resource-types-list">
           {filteredTypes.map(type => {
-            const typeResources = groupedResources[type];
+            const typeResources = getFilteredResourcesForType(type);
             const isExpanded = expandedTypes.has(type);
             const iconData = getAWSIcon(type);
 
@@ -339,7 +508,7 @@ function ProfileDetail({ profile, onBack }) {
                     </div>
                     <div className="type-info">
                       <div className="type-name">{type}</div>
-                      <div className="type-count">{typeResources.length} resources</div>
+                      <div className="type-count">{typeResources.length} resource{typeResources.length !== 1 ? 's' : ''}</div>
                     </div>
                   </div>
                   <div className="type-header-right">
@@ -364,7 +533,7 @@ function ProfileDetail({ profile, onBack }) {
                 {isExpanded && (
                   <div className="resource-list">
                     {typeResources.map(resource => {
-                      const drift = getDriftStatus(resource.id);
+                      const drift = viewMode === 'drift' ? getDriftStatus(resource.id) : null;
                       const hasDrift = drift && (drift.driftStatus === 'drifted' || drift.driftStatus === 'deleted');
 
                       return (
@@ -374,25 +543,27 @@ function ProfileDetail({ profile, onBack }) {
                           onClick={() => setSelectedResource(resource)}
                         >
                           <div className="resource-item-left">
-                            <div
-                              className="resource-status-dot"
-                              style={{
-                                backgroundColor: drift
-                                  ? drift.driftStatus === 'in_sync'
-                                    ? '#3FB950'
-                                    : drift.driftStatus === 'drifted' || drift.driftStatus === 'deleted'
-                                    ? '#F85149'
+                            {viewMode === 'drift' && (
+                              <div
+                                className="resource-status-dot"
+                                style={{
+                                  backgroundColor: drift
+                                    ? drift.driftStatus === 'in_sync'
+                                      ? '#3FB950'
+                                      : drift.driftStatus === 'drifted' || drift.driftStatus === 'deleted'
+                                      ? '#F85149'
+                                      : '#8B949E'
                                     : '#8B949E'
-                                  : '#8B949E'
-                              }}
-                            />
+                                }}
+                              />
+                            )}
                             <div className="resource-item-info">
                               <div className="resource-item-name">{resource.name}</div>
                               <div className="resource-item-id">{resource.id}</div>
                             </div>
                           </div>
                           <div className="resource-item-right">
-                            {drift && (
+                            {viewMode === 'drift' && drift && (
                               <span className={`drift-badge drift-${drift.driftStatus}`}>
                                 {drift.driftStatus === 'in_sync' && '✓ In Sync'}
                                 {drift.driftStatus === 'drifted' && '⚠ Drifted'}
@@ -417,7 +588,9 @@ function ProfileDetail({ profile, onBack }) {
             );
           })}
         </div>
+        )}
       </div>
+      )}
 
       {/* Resource Detail Modal */}
       {selectedResource && (
@@ -444,8 +617,8 @@ function ProfileDetail({ profile, onBack }) {
             </div>
 
             <div className="modal-body">
-              {/* Drift Status */}
-              {getDriftStatus(selectedResource.id) && (
+              {/* Drift Status - Only show in drift mode */}
+              {viewMode === 'drift' && getDriftStatus(selectedResource.id) && (
                 <div className="detail-section">
                   <h3>Drift Status</h3>
                   <div className={`drift-status-card drift-${getDriftStatus(selectedResource.id).driftStatus}`}>

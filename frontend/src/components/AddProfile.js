@@ -17,7 +17,7 @@ function AddProfile({ onBack, onProfileCreated, editProfile }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:7070';
+  const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
   const handleChange = (e) => {
     setFormData({
@@ -94,10 +94,9 @@ function AddProfile({ onBack, onProfileCreated, editProfile }) {
           setLoading(false);
           return;
         }
-      } else if (isEditMode) {
-        // Keep existing credentials when editing without providing new ones
-        payload.credentials = null;
       }
+      // When editing: if no new credentials provided, DON'T send credentials field at all
+      // This preserves existing credentials in the database
 
       if (isEditMode) {
         await axios.put(`${API_BASE}/api/profiles/${editProfile.id}`, payload);
