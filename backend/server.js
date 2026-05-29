@@ -122,9 +122,12 @@ function parseStateToGraph(tfState) {
       'aws_ecs_service': 'compute',
       'aws_lambda_function': 'compute',
       'aws_autoscaling_group': 'compute',
+      'aws_eks_cluster': 'compute',
+      'aws_eks_node_group': 'compute',
       'aws_s3_bucket': 'storage',
       'aws_ebs_volume': 'storage',
       'aws_dynamodb_table': 'storage',
+      'aws_ecr_repository': 'storage',
       'aws_vpc': 'network',
       'aws_subnet': 'network',
       'aws_security_group': 'network',
@@ -137,6 +140,7 @@ function parseStateToGraph(tfState) {
       'aws_vpc_endpoint': 'network',
       'aws_elb': 'network',
       'aws_alb': 'network',
+      'aws_lb': 'network',
       'aws_route53_zone': 'network',
       'aws_route53_record': 'network',
       'aws_iam_role': 'iam',
@@ -145,8 +149,14 @@ function parseStateToGraph(tfState) {
       'aws_db_instance': 'database',
       'aws_rds_cluster': 'database',
       'aws_elasticache_cluster': 'database',
+      'aws_elasticache_replication_group': 'database',
+      'aws_elasticsearch_domain': 'database',
+      'aws_opensearch_domain': 'database',
       'aws_cloudwatch_log_group': 'monitoring',
-      'aws_api_gateway_rest_api': 'api'
+      'aws_cloudwatch_metric_alarm': 'monitoring',
+      'aws_api_gateway_rest_api': 'api',
+      'aws_sqs_queue': 'other',
+      'aws_sns_topic': 'other'
     };
     return categoryMap[type] || 'other';
   };
@@ -464,6 +474,834 @@ const driftDetectors = {
     } catch (error) {
       if (error.code === 'NotFound' || error.code === 'NoSuchBucket') {
         return { status: 'deleted', message: 'Bucket not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_db_instance': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const rds = new AWS.RDS({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await rds.describeDBInstances({
+        DBInstanceIdentifier: resource.attributes.id
+      }).promise();
+
+      if (!result.DBInstances || result.DBInstances.length === 0) {
+        return { status: 'deleted', message: 'DB instance not found in AWS' };
+      }
+
+      const actual = result.DBInstances[0];
+      const differences = [];
+
+      if (actual.DBInstanceClass !== resource.attributes.instance_class) {
+        differences.push({ attribute: 'instance_class', expected: resource.attributes.instance_class, actual: actual.DBInstanceClass });
+      }
+      if (actual.Engine !== resource.attributes.engine) {
+        differences.push({ attribute: 'engine', expected: resource.attributes.engine, actual: actual.Engine });
+      }
+      if (actual.EngineVersion !== resource.attributes.engine_version) {
+        differences.push({ attribute: 'engine_version', expected: resource.attributes.engine_version, actual: actual.EngineVersion });
+      }
+      if (String(actual.MultiAZ) !== String(resource.attributes.multi_az)) {
+        differences.push({ attribute: 'multi_az', expected: String(resource.attributes.multi_az), actual: String(actual.MultiAZ) });
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'DBInstanceNotFound') {
+        return { status: 'deleted', message: 'DB instance not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_rds_cluster': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const rds = new AWS.RDS({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await rds.describeDBClusters({
+        DBClusterIdentifier: resource.attributes.id
+      }).promise();
+
+      if (!result.DBClusters || result.DBClusters.length === 0) {
+        return { status: 'deleted', message: 'RDS cluster not found in AWS' };
+      }
+
+      const actual = result.DBClusters[0];
+      const differences = [];
+
+      if (actual.Engine !== resource.attributes.engine) {
+        differences.push({ attribute: 'engine', expected: resource.attributes.engine, actual: actual.Engine });
+      }
+      if (actual.EngineVersion !== resource.attributes.engine_version) {
+        differences.push({ attribute: 'engine_version', expected: resource.attributes.engine_version, actual: actual.EngineVersion });
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'DBClusterNotFoundFault') {
+        return { status: 'deleted', message: 'RDS cluster not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_elasticache_cluster': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const elasticache = new AWS.ElastiCache({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await elasticache.describeCacheClusters({
+        CacheClusterId: resource.attributes.id
+      }).promise();
+
+      if (!result.CacheClusters || result.CacheClusters.length === 0) {
+        return { status: 'deleted', message: 'ElastiCache cluster not found in AWS' };
+      }
+
+      const actual = result.CacheClusters[0];
+      const differences = [];
+
+      if (actual.CacheNodeType !== resource.attributes.node_type) {
+        differences.push({ attribute: 'node_type', expected: resource.attributes.node_type, actual: actual.CacheNodeType });
+      }
+      if (actual.Engine !== resource.attributes.engine) {
+        differences.push({ attribute: 'engine', expected: resource.attributes.engine, actual: actual.Engine });
+      }
+      if (String(actual.NumCacheNodes) !== String(resource.attributes.num_cache_nodes)) {
+        differences.push({ attribute: 'num_cache_nodes', expected: String(resource.attributes.num_cache_nodes), actual: String(actual.NumCacheNodes) });
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'CacheClusterNotFound') {
+        return { status: 'deleted', message: 'ElastiCache cluster not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_elasticache_replication_group': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const elasticache = new AWS.ElastiCache({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await elasticache.describeReplicationGroups({
+        ReplicationGroupId: resource.attributes.id
+      }).promise();
+
+      if (!result.ReplicationGroups || result.ReplicationGroups.length === 0) {
+        return { status: 'deleted', message: 'ElastiCache replication group not found in AWS' };
+      }
+
+      const actual = result.ReplicationGroups[0];
+      const differences = [];
+
+      if (String(actual.AutomaticFailover) === 'enabled' !== (resource.attributes.automatic_failover_enabled === true || resource.attributes.automatic_failover_enabled === 'true')) {
+        differences.push({ attribute: 'automatic_failover_enabled', expected: String(resource.attributes.automatic_failover_enabled), actual: actual.AutomaticFailover });
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'ReplicationGroupNotFoundFault') {
+        return { status: 'deleted', message: 'ElastiCache replication group not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_sqs_queue': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const sqs = new AWS.SQS({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const url = resource.attributes.url || resource.attributes.id;
+      await sqs.getQueueAttributes({ QueueUrl: url, AttributeNames: ['All'] }).promise();
+      return { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'AWS.SimpleQueueService.NonExistentQueue') {
+        return { status: 'deleted', message: 'SQS queue not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_sns_topic': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const sns = new AWS.SNS({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      await sns.getTopicAttributes({ TopicArn: resource.attributes.arn || resource.attributes.id }).promise();
+      return { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'NotFound' || error.code === 'InvalidParameter') {
+        return { status: 'deleted', message: 'SNS topic not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_ecr_repository': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const ecr = new AWS.ECR({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await ecr.describeRepositories({
+        repositoryNames: [resource.attributes.name || resource.attributes.id]
+      }).promise();
+
+      if (!result.repositories || result.repositories.length === 0) {
+        return { status: 'deleted', message: 'ECR repository not found in AWS' };
+      }
+
+      const actual = result.repositories[0];
+      const differences = [];
+
+      if (actual.imageTagMutability !== (resource.attributes.image_tag_mutability || 'MUTABLE')) {
+        differences.push({ attribute: 'image_tag_mutability', expected: resource.attributes.image_tag_mutability || 'MUTABLE', actual: actual.imageTagMutability });
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'RepositoryNotFoundException') {
+        return { status: 'deleted', message: 'ECR repository not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_eks_cluster': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const eks = new AWS.EKS({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await eks.describeCluster({
+        name: resource.attributes.name || resource.attributes.id
+      }).promise();
+
+      if (!result.cluster) {
+        return { status: 'deleted', message: 'EKS cluster not found in AWS' };
+      }
+
+      const actual = result.cluster;
+      const differences = [];
+
+      if (actual.version !== resource.attributes.version) {
+        differences.push({ attribute: 'version', expected: resource.attributes.version, actual: actual.version });
+      }
+      if (actual.status !== 'ACTIVE') {
+        differences.push({ attribute: 'status', expected: 'ACTIVE', actual: actual.status });
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'ResourceNotFoundException') {
+        return { status: 'deleted', message: 'EKS cluster not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_eks_node_group': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const eks = new AWS.EKS({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await eks.describeNodegroup({
+        clusterName: resource.attributes.cluster_name,
+        nodegroupName: resource.attributes.node_group_name || resource.attributes.id
+      }).promise();
+
+      if (!result.nodegroup) {
+        return { status: 'deleted', message: 'EKS node group not found in AWS' };
+      }
+
+      const actual = result.nodegroup;
+      const differences = [];
+
+      if (actual.scalingConfig && resource.attributes.scaling_config) {
+        const expectedMin = Number(resource.attributes.scaling_config[0]?.min_size);
+        const expectedMax = Number(resource.attributes.scaling_config[0]?.max_size);
+        if (actual.scalingConfig.minSize !== expectedMin) {
+          differences.push({ attribute: 'scaling_config.min_size', expected: String(expectedMin), actual: String(actual.scalingConfig.minSize) });
+        }
+        if (actual.scalingConfig.maxSize !== expectedMax) {
+          differences.push({ attribute: 'scaling_config.max_size', expected: String(expectedMax), actual: String(actual.scalingConfig.maxSize) });
+        }
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'ResourceNotFoundException') {
+        return { status: 'deleted', message: 'EKS node group not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_lambda_function': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const lambda = new AWS.Lambda({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await lambda.getFunctionConfiguration({
+        FunctionName: resource.attributes.function_name || resource.attributes.id
+      }).promise();
+
+      const differences = [];
+
+      if (result.Runtime !== resource.attributes.runtime) {
+        differences.push({ attribute: 'runtime', expected: resource.attributes.runtime, actual: result.Runtime });
+      }
+      if (String(result.MemorySize) !== String(resource.attributes.memory_size)) {
+        differences.push({ attribute: 'memory_size', expected: String(resource.attributes.memory_size), actual: String(result.MemorySize) });
+      }
+      if (String(result.Timeout) !== String(resource.attributes.timeout)) {
+        differences.push({ attribute: 'timeout', expected: String(resource.attributes.timeout), actual: String(result.Timeout) });
+      }
+      if (result.Handler !== resource.attributes.handler) {
+        differences.push({ attribute: 'handler', expected: resource.attributes.handler, actual: result.Handler });
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'ResourceNotFoundException') {
+        return { status: 'deleted', message: 'Lambda function not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_dynamodb_table': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const dynamodb = new AWS.DynamoDB({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await dynamodb.describeTable({
+        TableName: resource.attributes.name || resource.attributes.id
+      }).promise();
+
+      if (!result.Table) {
+        return { status: 'deleted', message: 'DynamoDB table not found in AWS' };
+      }
+
+      const actual = result.Table;
+      const differences = [];
+
+      if (actual.BillingModeSummary) {
+        const actualMode = actual.BillingModeSummary.BillingMode;
+        const expectedMode = resource.attributes.billing_mode || 'PROVISIONED';
+        if (actualMode !== expectedMode) {
+          differences.push({ attribute: 'billing_mode', expected: expectedMode, actual: actualMode });
+        }
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'ResourceNotFoundException') {
+        return { status: 'deleted', message: 'DynamoDB table not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_ecs_cluster': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const ecs = new AWS.ECS({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    const result = await ecs.describeClusters({
+      clusters: [resource.attributes.arn || resource.attributes.id]
+    }).promise();
+
+    const cluster = result.clusters && result.clusters[0];
+    if (!cluster || cluster.status === 'INACTIVE') {
+      return { status: 'deleted', message: 'ECS cluster not found or inactive' };
+    }
+
+    return { status: 'in_sync' };
+  },
+
+  'aws_ecs_service': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const ecs = new AWS.ECS({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await ecs.describeServices({
+        cluster: resource.attributes.cluster,
+        services: [resource.attributes.name || resource.attributes.id]
+      }).promise();
+
+      const service = result.services && result.services[0];
+      if (!service || service.status === 'INACTIVE') {
+        return { status: 'deleted', message: 'ECS service not found or inactive' };
+      }
+
+      const differences = [];
+
+      if (String(service.desiredCount) !== String(resource.attributes.desired_count)) {
+        differences.push({ attribute: 'desired_count', expected: String(resource.attributes.desired_count), actual: String(service.desiredCount) });
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'ServiceNotFoundException') {
+        return { status: 'deleted', message: 'ECS service not found' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_cloudwatch_log_group': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const cwl = new AWS.CloudWatchLogs({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    const result = await cwl.describeLogGroups({
+      logGroupNamePrefix: resource.attributes.name || resource.attributes.id
+    }).promise();
+
+    const group = result.logGroups && result.logGroups.find(g => g.logGroupName === (resource.attributes.name || resource.attributes.id));
+    if (!group) {
+      return { status: 'deleted', message: 'CloudWatch log group not found in AWS' };
+    }
+
+    const differences = [];
+    const expectedRetention = resource.attributes.retention_in_days;
+    if (expectedRetention && String(group.retentionInDays) !== String(expectedRetention)) {
+      differences.push({ attribute: 'retention_in_days', expected: String(expectedRetention), actual: String(group.retentionInDays || 'never expires') });
+    }
+
+    return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+  },
+
+  'aws_lb': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const elbv2 = new AWS.ELBv2({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await elbv2.describeLoadBalancers({
+        LoadBalancerArns: [resource.attributes.arn || resource.attributes.id]
+      }).promise();
+
+      if (!result.LoadBalancers || result.LoadBalancers.length === 0) {
+        return { status: 'deleted', message: 'Load balancer not found in AWS' };
+      }
+
+      const actual = result.LoadBalancers[0];
+      const differences = [];
+
+      const expectedScheme = resource.attributes.internal ? 'internal' : 'internet-facing';
+      if (actual.Scheme !== expectedScheme) {
+        differences.push({ attribute: 'scheme', expected: expectedScheme, actual: actual.Scheme });
+      }
+      if (actual.State.Code !== 'active') {
+        differences.push({ attribute: 'state', expected: 'active', actual: actual.State.Code });
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'LoadBalancerNotFound') {
+        return { status: 'deleted', message: 'Load balancer not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_alb': async (resource, credentials) => {
+    return driftDetectors['aws_lb'](resource, credentials);
+  },
+
+  'aws_elb': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const elb = new AWS.ELB({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await elb.describeLoadBalancers({
+        LoadBalancerNames: [resource.attributes.name || resource.attributes.id]
+      }).promise();
+
+      if (!result.LoadBalancerDescriptions || result.LoadBalancerDescriptions.length === 0) {
+        return { status: 'deleted', message: 'Classic ELB not found in AWS' };
+      }
+
+      return { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'LoadBalancerNotFound') {
+        return { status: 'deleted', message: 'Classic ELB not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_route53_zone': async (resource, credentials) => {
+    const route53 = new AWS.Route53({
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const zoneId = (resource.attributes.zone_id || resource.attributes.id || '').replace('/hostedzone/', '');
+      const result = await route53.getHostedZone({ Id: zoneId }).promise();
+
+      if (!result.HostedZone) {
+        return { status: 'deleted', message: 'Route53 zone not found in AWS' };
+      }
+
+      return { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'NoSuchHostedZone') {
+        return { status: 'deleted', message: 'Route53 zone not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_internet_gateway': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const ec2 = new AWS.EC2({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    const result = await ec2.describeInternetGateways({
+      InternetGatewayIds: [resource.attributes.id]
+    }).promise();
+
+    if (!result.InternetGateways || result.InternetGateways.length === 0) {
+      return { status: 'deleted', message: 'Internet gateway not found in AWS' };
+    }
+
+    const differences = [];
+    const tagDiffs = compareTags(resource.attributes.tags, result.InternetGateways[0].Tags);
+    differences.push(...tagDiffs);
+
+    return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+  },
+
+  'aws_nat_gateway': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const ec2 = new AWS.EC2({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    const result = await ec2.describeNatGateways({
+      NatGatewayIds: [resource.attributes.id]
+    }).promise();
+
+    const gw = result.NatGateways && result.NatGateways[0];
+    if (!gw || gw.State === 'deleted') {
+      return { status: 'deleted', message: 'NAT gateway not found or deleted' };
+    }
+    if (gw.State !== 'available') {
+      return { status: 'drifted', differences: [{ attribute: 'state', expected: 'available', actual: gw.State }] };
+    }
+
+    return { status: 'in_sync' };
+  },
+
+  'aws_eip': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const ec2 = new AWS.EC2({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await ec2.describeAddresses({
+        AllocationIds: [resource.attributes.allocation_id || resource.attributes.id]
+      }).promise();
+
+      if (!result.Addresses || result.Addresses.length === 0) {
+        return { status: 'deleted', message: 'Elastic IP not found in AWS' };
+      }
+
+      return { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'InvalidAllocationID.NotFound') {
+        return { status: 'deleted', message: 'Elastic IP not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_network_acl': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const ec2 = new AWS.EC2({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await ec2.describeNetworkAcls({
+        NetworkAclIds: [resource.attributes.id]
+      }).promise();
+
+      if (!result.NetworkAcls || result.NetworkAcls.length === 0) {
+        return { status: 'deleted', message: 'Network ACL not found in AWS' };
+      }
+
+      return { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'InvalidNetworkAclID.NotFound') {
+        return { status: 'deleted', message: 'Network ACL not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_vpc_endpoint': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const ec2 = new AWS.EC2({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    const result = await ec2.describeVpcEndpoints({
+      VpcEndpointIds: [resource.attributes.id]
+    }).promise();
+
+    const endpoint = result.VpcEndpoints && result.VpcEndpoints[0];
+    if (!endpoint || endpoint.State === 'deleted') {
+      return { status: 'deleted', message: 'VPC endpoint not found or deleted' };
+    }
+
+    return { status: 'in_sync' };
+  },
+
+  'aws_route_table': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const ec2 = new AWS.EC2({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await ec2.describeRouteTables({
+        RouteTableIds: [resource.attributes.id]
+      }).promise();
+
+      if (!result.RouteTables || result.RouteTables.length === 0) {
+        return { status: 'deleted', message: 'Route table not found in AWS' };
+      }
+
+      const differences = [];
+      const tagDiffs = compareTags(resource.attributes.tags, result.RouteTables[0].Tags);
+      differences.push(...tagDiffs);
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'InvalidRouteTableID.NotFound') {
+        return { status: 'deleted', message: 'Route table not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_iam_role': async (resource, credentials) => {
+    const iam = new AWS.IAM({
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await iam.getRole({
+        RoleName: resource.attributes.name || resource.attributes.id
+      }).promise();
+
+      if (!result.Role) {
+        return { status: 'deleted', message: 'IAM role not found in AWS' };
+      }
+
+      return { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'NoSuchEntity') {
+        return { status: 'deleted', message: 'IAM role not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_iam_policy': async (resource, credentials) => {
+    const iam = new AWS.IAM({
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      await iam.getPolicy({
+        PolicyArn: resource.attributes.arn || resource.attributes.id
+      }).promise();
+
+      return { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'NoSuchEntity') {
+        return { status: 'deleted', message: 'IAM policy not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_opensearch_domain': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const opensearch = new AWS.OpenSearch({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await opensearch.describeDomain({
+        DomainName: resource.attributes.domain_name || resource.attributes.id
+      }).promise();
+
+      if (!result.DomainStatus) {
+        return { status: 'deleted', message: 'OpenSearch domain not found in AWS' };
+      }
+
+      const actual = result.DomainStatus;
+      const differences = [];
+
+      if (actual.EngineVersion !== resource.attributes.engine_version) {
+        differences.push({ attribute: 'engine_version', expected: resource.attributes.engine_version, actual: actual.EngineVersion });
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'ResourceNotFoundException') {
+        return { status: 'deleted', message: 'OpenSearch domain not found in AWS' };
+      }
+      throw error;
+    }
+  },
+
+  'aws_elasticsearch_domain': async (resource, credentials) => {
+    const region = getResourceRegion(resource, credentials.region || 'us-east-1');
+    const es = new AWS.ES({
+      region,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken && { sessionToken: credentials.sessionToken })
+    });
+
+    try {
+      const result = await es.describeElasticsearchDomain({
+        DomainName: resource.attributes.domain_name || resource.attributes.id
+      }).promise();
+
+      if (!result.DomainStatus) {
+        return { status: 'deleted', message: 'Elasticsearch domain not found in AWS' };
+      }
+
+      const actual = result.DomainStatus;
+      const differences = [];
+
+      if (actual.ElasticsearchVersion !== resource.attributes.elasticsearch_version) {
+        differences.push({ attribute: 'elasticsearch_version', expected: resource.attributes.elasticsearch_version, actual: actual.ElasticsearchVersion });
+      }
+
+      return differences.length > 0 ? { status: 'drifted', differences } : { status: 'in_sync' };
+    } catch (error) {
+      if (error.code === 'ResourceNotFoundException') {
+        return { status: 'deleted', message: 'Elasticsearch domain not found in AWS' };
       }
       throw error;
     }

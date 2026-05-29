@@ -1911,3 +1911,362 @@ body {
 .loading-step.pending span {
   color: #8b949e;
 }
+
+/* ===== 3-WAY TOGGLE ===== */
+.view-toggle-3 {
+  min-width: 0;
+}
+
+.view-toggle-3 .toggle-option {
+  min-width: 120px;
+}
+
+.toggle-slider-3 {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: calc(33.333% - 4px);
+  height: calc(100% - 8px);
+  border-radius: 6px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1;
+}
+
+.toggle-slider-3--infra {
+  background: linear-gradient(135deg, #388BFD 0%, #2563EB 100%);
+  box-shadow: 0 2px 8px rgba(56, 139, 253, 0.3);
+  transform: translateX(0);
+}
+
+.toggle-slider-3--drift {
+  background: linear-gradient(135deg, #F85149 0%, #E03131 100%);
+  box-shadow: 0 2px 8px rgba(248, 81, 73, 0.3);
+  transform: translateX(calc(100% + 4px));
+}
+
+.toggle-slider-3--plan {
+  background: linear-gradient(135deg, #8957e5 0%, #6e40c9 100%);
+  box-shadow: 0 2px 8px rgba(137, 87, 229, 0.35);
+  transform: translateX(calc(200% + 8px));
+}
+
+/* ===== PLAN PASTE MODAL ===== */
+.plan-modal {
+  max-width: 680px;
+  width: 95vw;
+}
+
+.plan-textarea {
+  width: 100%;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  color: #e6edf3;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  padding: 1rem;
+  resize: vertical;
+  outline: none;
+  line-height: 1.5;
+  transition: border-color 0.2s;
+}
+
+.plan-textarea:focus {
+  border-color: #8957e5;
+}
+
+.plan-parse-error {
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid rgba(248, 81, 73, 0.3);
+  border-radius: 8px;
+  color: #F85149;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.plan-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.btn-plan-analyze {
+  background: linear-gradient(135deg, #8957e5 0%, #6e40c9 100%) !important;
+  border-color: #8957e5 !important;
+  gap: 0.5rem;
+}
+
+.btn-plan-analyze:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ===== PLAN ANALYSIS VIEW ===== */
+.plan-analysis-container {
+  padding: 1.5rem 2.5rem;
+  flex: 1;
+}
+
+.plan-analysis-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+
+.plan-analysis-title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.plan-emoji {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.plan-analysis-title h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #e6edf3;
+  margin-bottom: 0.2rem;
+}
+
+.plan-analysis-title p {
+  font-size: 0.875rem;
+  color: #8b949e;
+}
+
+.btn-plan-reload {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(137, 87, 229, 0.1);
+  border: 1px solid rgba(137, 87, 229, 0.3);
+  border-radius: 8px;
+  color: #b392f0;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-plan-reload:hover {
+  background: rgba(137, 87, 229, 0.2);
+}
+
+.plan-no-drift-notice {
+  background: rgba(56, 139, 253, 0.08);
+  border: 1px solid rgba(56, 139, 253, 0.2);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  color: #8b949e;
+  margin-bottom: 1.25rem;
+}
+
+.plan-no-drift-notice strong {
+  color: #388BFD;
+}
+
+/* ===== PLAN TABLE ===== */
+.plan-table-wrapper {
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid #21262d;
+}
+
+.plan-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #161b22;
+  font-size: 0.875rem;
+}
+
+.plan-table thead {
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+}
+
+.plan-table th {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.plan-table tbody tr {
+  border-bottom: 1px solid #21262d;
+  transition: background 0.15s;
+}
+
+.plan-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.plan-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.plan-row--has-drift {
+  background: rgba(248, 81, 73, 0.04) !important;
+}
+
+.plan-row--has-drift:hover {
+  background: rgba(248, 81, 73, 0.07) !important;
+}
+
+.plan-table td {
+  padding: 0.875rem 1rem;
+  vertical-align: top;
+}
+
+/* resource cell */
+.plan-resource-name {
+  font-weight: 600;
+  color: #e6edf3;
+  margin-bottom: 0.2rem;
+}
+
+.plan-resource-type {
+  font-size: 0.75rem;
+  color: #8b949e;
+  font-family: monospace;
+}
+
+/* action badge */
+.plan-action-badge {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.plan-action--create { background: rgba(63, 185, 80, 0.15); color: #3FB950; }
+.plan-action--delete { background: rgba(248, 81, 73, 0.15); color: #F85149; }
+.plan-action--update { background: rgba(253, 203, 110, 0.15); color: #FDCB6E; }
+.plan-action--replace { background: rgba(255, 153, 51, 0.15); color: #FF9933; }
+.plan-action--no-op { background: rgba(139, 148, 158, 0.1); color: #8b949e; }
+
+/* drift badge in table */
+.plan-drift-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.drift-in-sync { background: rgba(63, 185, 80, 0.12); color: #3FB950; }
+.drift-drifted { background: rgba(248, 81, 73, 0.12); color: #F85149; }
+.drift-deleted { background: rgba(248, 81, 73, 0.12); color: #F85149; }
+.drift-unchecked { background: rgba(139, 148, 158, 0.1); color: #8b949e; }
+
+/* diff list in plan table */
+.plan-diff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.plan-diff-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  flex-wrap: wrap;
+}
+
+.plan-diff-item code {
+  background: rgba(255,255,255,0.05);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  color: #8b949e;
+  font-size: 0.75rem;
+}
+
+.plan-diff-expected {
+  color: #F85149;
+  font-family: monospace;
+  font-size: 0.78rem;
+}
+
+.plan-diff-actual {
+  color: #3FB950;
+  font-family: monospace;
+  font-size: 0.78rem;
+}
+
+.plan-diff-arrow {
+  color: #8b949e;
+  font-size: 0.75rem;
+}
+
+.plan-no-changes {
+  color: #30363d;
+}
+
+/* suggestion cell */
+.plan-cell-suggestion {
+  max-width: 300px;
+}
+
+.plan-suggestion-text {
+  color: #c9d1d9;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+/* ===== PLAN TABLE ADDITIONS ===== */
+.th-sub {
+  font-size: 0.65rem;
+  font-weight: 400;
+  color: #30363d;
+  text-transform: none;
+  letter-spacing: 0;
+  display: block;
+  margin-top: 2px;
+}
+
+.plan-resource-addr {
+  font-size: 0.7rem;
+  color: #30363d;
+  font-family: monospace;
+  margin-top: 2px;
+}
+
+.plan-diff-values {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.plan-diff-before {
+  color: #F85149;
+  font-family: monospace;
+  font-size: 0.78rem;
+  background: rgba(248, 81, 73, 0.08);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.plan-diff-after {
+  color: #3FB950;
+  font-family: monospace;
+  font-size: 0.78rem;
+  background: rgba(63, 185, 80, 0.08);
+  padding: 0 4px;
+  border-radius: 3px;
+}

@@ -18,6 +18,12 @@ function ProfileDetail({ profile, onBack }) {
   const [stateMetadata, setStateMetadata] = useState(null);
   const [showOnlyDrifted, setShowOnlyDrifted] = useState(false);
 
+  // Plan Analyzer state
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [planInput, setPlanInput] = useState('');
+  const [planParseError, setPlanParseError] = useState(null);
+  const [planAnalysis, setPlanAnalysis] = useState(null);
+
   const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5050';
 
   // AWS Service Icons
@@ -33,15 +39,30 @@ function ProfileDetail({ profile, onBack }) {
       'aws_iam_role': { icon: 'IAM', color: '#DD344C' },
       'aws_iam_policy': { icon: 'POL', color: '#DD344C' },
       'aws_db_instance': { icon: 'RDS', color: '#4053D6' },
+      'aws_rds_cluster': { icon: 'RDS', color: '#4053D6' },
       'aws_ecs_cluster': { icon: 'ECS', color: '#FF9900' },
       'aws_ecs_service': { icon: 'ECS', color: '#FF9900' },
+      'aws_eks_cluster': { icon: 'EKS', color: '#FF9900' },
+      'aws_eks_node_group': { icon: 'EKS', color: '#FF9900' },
+      'aws_ecr_repository': { icon: 'ECR', color: '#FF9900' },
+      'aws_elasticache_cluster': { icon: 'EC', color: '#C7131F' },
+      'aws_elasticache_replication_group': { icon: 'EC', color: '#C7131F' },
+      'aws_elasticsearch_domain': { icon: 'ES', color: '#005EB8' },
+      'aws_opensearch_domain': { icon: 'OS', color: '#005EB8' },
+      'aws_sqs_queue': { icon: 'SQS', color: '#FF4F8B' },
+      'aws_sns_topic': { icon: 'SNS', color: '#FF4F8B' },
       'aws_cloudwatch_log_group': { icon: 'CW', color: '#E7157B' },
       'aws_route_table': { icon: 'RT', color: '#7AA116' },
       'aws_internet_gateway': { icon: 'IGW', color: '#7AA116' },
       'aws_nat_gateway': { icon: 'NAT', color: '#7AA116' },
       'aws_eip': { icon: 'EIP', color: '#7AA116' },
+      'aws_network_acl': { icon: 'ACL', color: '#7AA116' },
+      'aws_vpc_endpoint': { icon: 'EPT', color: '#7AA116' },
+      'aws_route53_zone': { icon: 'R53', color: '#8C4FFF' },
+      'aws_route53_record': { icon: 'R53', color: '#8C4FFF' },
       'aws_elb': { icon: 'ELB', color: '#8C4FFF' },
       'aws_alb': { icon: 'ALB', color: '#8C4FFF' },
+      'aws_lb': { icon: 'ALB', color: '#8C4FFF' },
       'aws_api_gateway_rest_api': { icon: 'API', color: '#FF4F8B' },
       'default': { icon: 'AWS', color: '#FF9900' }
     };
@@ -244,14 +265,183 @@ function ProfileDetail({ profile, onBack }) {
   // Switch to current infra view
   const handleCurrentInfra = () => {
     setViewMode('infra');
-    setShowOnlyDrifted(false); // Reset drift filter when switching to infra view
-    setDriftData(null); // Clear old drift data
+    setShowOnlyDrifted(false);
+    setDriftData(null);
+    setShowPlanModal(false);
   };
 
   // Get drift status for a resource
   const getDriftStatus = (resourceId) => {
     if (!driftData) return null;
     return driftData.resources.find(r => r.resourceId === resourceId);
+  };
+
+  // Diff two flat/tag objects — returns [{attribute, before, after}]
+  const getObjectDiffs = (before, after) => {
+    const diffs = [];
+    if (!before || !after) return diffs;
+
+    const flattenTags = (obj, prefix = '') => {
+      const out = {};
+      for (const [k, v] of Object.entries(obj || {})) {
+        if (k === 'tags' || k === 'tags_all') {
+          for (const [tk, tv] of Object.entries(v || {})) {
+            out[`${k}.${tk}`] = tv;
+          }
+        } else if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+          // skip deep nested
+        } else if (!Array.isArray(v)) {
+          out[prefix + k] = v === null ? 'null' : String(v);
+        }
+      }
+      return out;
+    };
+
+    const bFlat = flattenTags(before);
+    const aFlat = flattenTags(after);
+    const allKeys = new Set([...Object.keys(bFlat), ...Object.keys(aFlat)]);
+
+    for (const key of allKeys) {
+      if (bFlat[key] !== aFlat[key]) {
+        diffs.push({
+          attribute: key,
+          before: bFlat[key] ?? '(none)',
+          after: aFlat[key] ?? '(removed)',
+        });
+      }
+    }
+    return diffs;
+  };
+
+  // Parse terraform plan JSON and cross-reference with state + drift
+  const analyzePlan = () => {
+    setPlanParseError(null);
+    let plan;
+    try {
+      plan = JSON.parse(planInput.trim());
+    } catch (e) {
+      setPlanParseError('Invalid JSON — paste the output of: terraform show -json tfplan');
+      return;
+    }
+
+    const resourceChanges = plan.resource_changes || [];
+    const resourceDrift = plan.resource_drift || [];
+
+    // Only show managed resources with actual changes
+    const actualChanges = resourceChanges.filter(rc =>
+      rc.mode === 'managed' && rc.change?.actions && !rc.change.actions.every(a => a === 'no-op')
+    );
+
+    if (actualChanges.length === 0) {
+      setPlanParseError('No changes in this plan — everything is already in sync. Nothing to analyze! 🎉');
+      return;
+    }
+
+    // Build drift map from plan's own resource_drift section (AWS drift Terraform detected)
+    const planDriftMap = {};
+    resourceDrift.forEach(rd => { planDriftMap[rd.address] = rd; });
+
+    const funny = {
+      create_drifted: [
+        "Terraform wants to create it, but AWS already has a surprise for you 👀 Run: terraform import {type}.{name} {id}",
+        "Plot twist: AWS already built this behind your back. Run: terraform import {type}.{name} {id}",
+      ],
+      create_clean: [
+        "Fresh resource incoming. Looks clean, go ahead and apply! 🚀",
+        "Nothing in state, nothing in AWS — this is a clean create. Proceed!",
+      ],
+      delete_drifted: [
+        "Terraform says delete it, but AWS already deleted it for you. Run: terraform refresh, then apply. 🪦",
+        "AWS beat Terraform to the punch and YEET'd this already. Run: terraform refresh",
+      ],
+      delete_clean: [
+        "Looks good to delete. Resource is in sync so this is a clean destroy. 💣",
+        "State matches AWS. You can safely terraform apply this delete.",
+      ],
+      update_drifted: [
+        "Triple threat! Plan wants to change it, AWS already changed it, and state is somewhere in between. Run: terraform refresh, then re-plan. 🤯",
+        "Three-way disagreement: Plan says one thing, state says another, AWS said 'hold my beer'. Run: terraform refresh ☕",
+      ],
+      update_clean: [
+        "Clean update — state matches AWS and your plan is a proper delta. Safe to apply! ✅",
+        "No surprises. Plan change looks legit. Go for it.",
+      ],
+      replace_drifted: [
+        "Terraform plans a destroy+recreate on a drifted resource. High risk! Run: terraform refresh first, then re-plan. 🎢",
+        "Full replace on drifted infra. Verify manually before applying. This could hurt. ⚠️",
+      ],
+      replace_clean: [
+        "Forced replace on a clean resource. No drift, should be fine — but double-check why it's being replaced.",
+      ],
+      no_op: [
+        "Nothing to do here. Terraform and AWS agree. Rare sighting — screenshot this. 📸",
+      ],
+    };
+
+    const pick = (key, rc) => {
+      const options = funny[key] || ["Looks fine."];
+      const msg = options[Math.floor(Math.random() * options.length)];
+      return msg
+        .replace('{type}', rc.type)
+        .replace('{name}', rc.name)
+        .replace('{id}', rc.change?.before?.id || '<resource-id>');
+    };
+
+    const results = actualChanges.map(rc => {
+      const actions = rc.change?.actions || ['no-op'];
+      const actionStr = actions.includes('create') && actions.includes('delete') ? 'replace' : actions[0];
+
+      // Match against loaded state resources
+      const stateResource = resources.find(r => r.type === rc.type && r.name === rc.name);
+      const driftDetectorResult = stateResource ? getDriftStatus(stateResource.id) : null;
+      let driftState = driftDetectorResult
+        ? driftDetectorResult.driftStatus
+        : (stateResource ? 'unchecked' : 'not_in_state');
+
+      // Plan diffs: state → proposed (what your .tf change will do)
+      const planDiffs = getObjectDiffs(rc.change?.before, rc.change?.after);
+
+      // AWS drift: what Terraform itself detected AWS changed without it
+      const planDriftEntry = planDriftMap[rc.address];
+      const awsDriftDiffs = planDriftEntry
+        ? getObjectDiffs(planDriftEntry.change?.before, planDriftEntry.change?.after)
+        : [];
+
+      // Override driftState if plan itself detected AWS drift
+      if (awsDriftDiffs.length > 0 && driftState === 'unchecked') driftState = 'drifted';
+
+      const hasDrift = driftState === 'drifted' || driftState === 'deleted' || awsDriftDiffs.length > 0;
+      let suggestionKey = actionStr === 'no-op' ? 'no_op' : hasDrift ? `${actionStr}_drifted` : `${actionStr}_clean`;
+      if (!funny[suggestionKey]) suggestionKey = 'no_op';
+
+      return {
+        address: rc.address,
+        type: rc.type,
+        name: rc.name,
+        action: actionStr,
+        driftState,
+        planDiffs,
+        awsDriftDiffs,
+        driftDetectorDiffs: driftDetectorResult?.driftDetails?.differences || null,
+        suggestion: pick(suggestionKey, rc),
+      };
+    });
+
+    setPlanAnalysis(results);
+    setShowPlanModal(false);
+    setViewMode('plan');
+  };
+
+  const handleOpenPlanAnalyzer = () => {
+    setShowPlanModal(true);
+  };
+
+  const handleSwitchToPlan = () => {
+    if (planAnalysis) {
+      setViewMode('plan');
+    } else {
+      setShowPlanModal(true);
+    }
   };
 
   useEffect(() => {
@@ -334,7 +524,7 @@ function ProfileDetail({ profile, onBack }) {
             </div>
 
             {/* View Mode Toggle Switch */}
-            <div className="view-toggle">
+            <div className="view-toggle view-toggle-3">
               <button
                 className={`toggle-option ${viewMode === 'infra' ? 'active' : ''}`}
                 onClick={handleCurrentInfra}
@@ -368,7 +558,19 @@ function ProfileDetail({ profile, onBack }) {
                   </>
                 )}
               </button>
-              <div className={`toggle-slider ${viewMode === 'drift' ? 'drift-active' : ''}`}></div>
+              <button
+                className={`toggle-option ${viewMode === 'plan' ? 'active' : ''}`}
+                onClick={handleSwitchToPlan}
+                disabled={driftLoading || credentialChecking}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 3h10M3 6h7M3 9h9M3 12h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  <circle cx="13" cy="11" r="2.5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  <path d="M12 11l.8.8 1.5-1.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                <span>Plan Analyzer</span>
+              </button>
+              <div className={`toggle-slider-3 toggle-slider-3--${viewMode}`}></div>
             </div>
 
             {/* Credential Status Badge */}
@@ -486,7 +688,7 @@ function ProfileDetail({ profile, onBack }) {
       )}
 
       {/* Main Content */}
-      {!(viewMode === 'drift' && driftLoading && !driftData) && (
+      {!(viewMode === 'drift' && driftLoading && !driftData) && viewMode !== 'plan' && (
         <div className="main-container">
           {/* Hide resources in drift mode if no credentials */}
           {!(viewMode === 'drift' && !profile.hasCredentials) && (
@@ -590,6 +792,183 @@ function ProfileDetail({ profile, onBack }) {
         </div>
         )}
       </div>
+      )}
+
+      {/* Plan Paste Modal */}
+      {showPlanModal && (
+        <div className="modal-overlay" onClick={() => setShowPlanModal(false)}>
+          <div className="modal-content plan-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">
+                <div className="aws-service-icon large" style={{ backgroundColor: '#8957e5' }}>📋</div>
+                <div>
+                  <h2>Paste Terraform Plan</h2>
+                  <div className="modal-subtitle">Run: <code>terraform plan -out=tfplan && terraform show -json tfplan</code> and paste output below</div>
+                </div>
+              </div>
+              <button className="modal-close" onClick={() => setShowPlanModal(false)}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <path d="M6 6L18 18M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                </svg>
+              </button>
+            </div>
+            <div className="modal-body">
+              {planParseError && (
+                <div className="plan-parse-error">
+                  <span>⚠️ {planParseError}</span>
+                </div>
+              )}
+              <textarea
+                className="plan-textarea"
+                placeholder='Paste your terraform show -json output here...'
+                value={planInput}
+                onChange={e => { setPlanInput(e.target.value); setPlanParseError(null); }}
+                rows={14}
+                spellCheck={false}
+              />
+              <div className="plan-modal-actions">
+                <button className="btn" onClick={() => setShowPlanModal(false)}>Cancel</button>
+                <button
+                  className="btn btn-primary btn-plan-analyze"
+                  onClick={analyzePlan}
+                  disabled={!planInput.trim()}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M8 2l6 4-6 4V2z" fill="currentColor"/>
+                    <path d="M2 6h4M2 10h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                  Analyze Plan
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Plan Analysis View */}
+      {viewMode === 'plan' && planAnalysis && (
+        <div className="plan-analysis-container">
+          <div className="plan-analysis-header">
+            <div className="plan-analysis-title">
+              <span className="plan-emoji">🔍</span>
+              <div>
+                <h2>Plan Analysis</h2>
+                <p>{planAnalysis.length} resource change{planAnalysis.length !== 1 ? 's' : ''} — cross-referenced with state & drift</p>
+              </div>
+            </div>
+            <button className="btn btn-plan-reload" onClick={() => setShowPlanModal(true)}>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M1 7a6 6 0 106-6H4M4 1L1 4l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              New Plan
+            </button>
+          </div>
+
+          {!driftData && (
+            <div className="plan-no-drift-notice">
+              <span>💡 Tip: Run <strong>Drift Detection</strong> first for richer analysis — we'll cross-reference your plan against live AWS state too.</span>
+            </div>
+          )}
+
+          <div className="plan-table-wrapper">
+            <table className="plan-table">
+              <thead>
+                <tr>
+                  <th>Resource</th>
+                  <th>Action</th>
+                  <th>Your Plan Changes<br/><span className="th-sub">state → proposed (.tf)</span></th>
+                  <th>AWS Drift<br/><span className="th-sub">state → actual AWS</span></th>
+                  <th>Drift Detector<br/><span className="th-sub">live AWS check</span></th>
+                  <th>Suggestion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {planAnalysis.map((row, idx) => (
+                  <tr key={idx} className={`plan-row plan-row--${row.action} ${(row.driftState === 'drifted' || row.driftState === 'deleted') ? 'plan-row--has-drift' : ''}`}>
+                    <td className="plan-cell-resource">
+                      <div className="plan-resource-name">{row.name}</div>
+                      <div className="plan-resource-type">{row.type}</div>
+                      <div className="plan-resource-addr">{row.address}</div>
+                    </td>
+                    <td className="plan-cell-action">
+                      <span className={`plan-action-badge plan-action--${row.action}`}>
+                        {row.action === 'create' && '+ create'}
+                        {row.action === 'delete' && '− destroy'}
+                        {row.action === 'update' && '~ update'}
+                        {row.action === 'replace' && '↺ replace'}
+                        {row.action === 'no-op' && '= no-op'}
+                      </span>
+                    </td>
+
+                    {/* Plan diffs: what your .tf change proposes */}
+                    <td className="plan-cell-changes">
+                      {row.planDiffs && row.planDiffs.length > 0 ? (
+                        <div className="plan-diff-list">
+                          {row.planDiffs.map((d, i) => (
+                            <div key={i} className="plan-diff-item">
+                              <code>{d.attribute}</code>
+                              <div className="plan-diff-values">
+                                <span className="plan-diff-before">{d.before}</span>
+                                <span className="plan-diff-arrow">→</span>
+                                <span className="plan-diff-after">{d.after}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : <span className="plan-no-changes">no changes</span>}
+                    </td>
+
+                    {/* AWS drift: what Terraform itself detected changed in AWS */}
+                    <td className="plan-cell-changes">
+                      {row.awsDriftDiffs && row.awsDriftDiffs.length > 0 ? (
+                        <div className="plan-diff-list">
+                          {row.awsDriftDiffs.map((d, i) => (
+                            <div key={i} className="plan-diff-item">
+                              <code>{d.attribute}</code>
+                              <div className="plan-diff-values">
+                                <span className="plan-diff-before">{d.before}</span>
+                                <span className="plan-diff-arrow">→</span>
+                                <span className="plan-diff-after">{d.after}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : <span className="plan-no-changes">no drift</span>}
+                    </td>
+
+                    {/* Drift detector result from live AWS check */}
+                    <td className="plan-cell-drift">
+                      {row.driftState === 'in_sync' && <span className="plan-drift-badge drift-in-sync">✓ In Sync</span>}
+                      {row.driftState === 'drifted' && (
+                        <>
+                          <span className="plan-drift-badge drift-drifted">⚠ Drifted</span>
+                          {row.driftDetectorDiffs && row.driftDetectorDiffs.map((d, i) => (
+                            <div key={i} className="plan-diff-item" style={{marginTop:'4px'}}>
+                              <code>{d.attribute}</code>
+                              <div className="plan-diff-values">
+                                <span className="plan-diff-before">{d.expected}</span>
+                                <span className="plan-diff-arrow">→</span>
+                                <span className="plan-diff-after">{d.actual}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                      {row.driftState === 'deleted' && <span className="plan-drift-badge drift-deleted">✕ Deleted in AWS</span>}
+                      {row.driftState === 'unchecked' && <span className="plan-drift-badge drift-unchecked">− Run drift check</span>}
+                      {row.driftState === 'not_in_state' && <span className="plan-drift-badge drift-unchecked">∅ Not in state</span>}
+                      {row.driftState === 'unsupported' && <span className="plan-drift-badge drift-unchecked">− Unsupported</span>}
+                    </td>
+
+                    <td className="plan-cell-suggestion">
+                      <div className="plan-suggestion-text">{row.suggestion}</div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* Resource Detail Modal */}
