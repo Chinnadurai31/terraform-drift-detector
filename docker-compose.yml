@@ -54,7 +54,8 @@ services:
     ports:
       - "3000:80"
     environment:
-      - REACT_APP_API_URL=http://localhost:5050
+      - BACKEND_HOST=backend
+      - BACKEND_PORT=5050
     depends_on:
       - backend
     restart: unless-stopped

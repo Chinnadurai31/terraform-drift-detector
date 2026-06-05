@@ -17,7 +17,7 @@ function AddProfile({ onBack, onProfileCreated, editProfile }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5050';
+  const API_BASE = process.env.REACT_APP_API_URL || '';
 
   const handleChange = (e) => {
     setFormData({

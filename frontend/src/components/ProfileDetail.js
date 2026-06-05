@@ -24,7 +24,7 @@ function ProfileDetail({ profile, onBack }) {
   const [planParseError, setPlanParseError] = useState(null);
   const [planAnalysis, setPlanAnalysis] = useState(null);
 
-  const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5050';
+  const API_BASE = process.env.REACT_APP_API_URL || '';
 
   // AWS Service Icons
   const getAWSIcon = (type) => {
